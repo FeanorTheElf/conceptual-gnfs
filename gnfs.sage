@@ -59,7 +59,7 @@ def is_smooth(element, factor_basis):
     N = element.norm()
     for p in factor_basis:
         if N % p == 0:
-            N /= p
+            N = N / p
 
     return N.norm() == 1 or N.norm() == -1
 
@@ -79,16 +79,18 @@ def find_sieving_distances(norm_poly, p, a):
     if len(points) == 0:
         return None
     points = sorted(points)
-    return (points[0], [*[points[i] - points[i - 1] for i in range(1, len(points))], p - points[-1]])
+    distances = [*[points[i] - points[i - 1] for i in range(1, len(points))], p + points[0] - points[-1]]
+    assert sum(distances) == p
+    return (points[0], distances)
 
-def sieve(start, end, p, sieving_start, sieving_distances, sieving_interval):
+def sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval):
     current = start + p - (start % p) + sieving_start
     while True:
         for d in sieving_distances:
             # this can only happen if the number field is Z
             if sieving_interval[current - start] != 0:
                 while sieving_interval[current - start] % p == 0:
-                    sieving_interval[current - start] /= p
+                    sieving_interval[current - start] = sieving_interval[current - start] / p
             current += d
             if current >= end:
                 return
@@ -99,14 +101,12 @@ def sieve_relations(diamond: Diamond, factor_basis):
     X, = poly_ring.gens()
     A, B = PolynomialRing(ZZ, ['A', 'B']).gens()
     norm_polys = (
-        A.parent()(diamond.left.gen().minpoly()(B/A) * A**diamond.left.degree()),
-        A.parent()(diamond.right.gen().minpoly()(B/A) * A**diamond.right.degree())
+        A.parent()(diamond.left.gen().minpoly()(-B/A) * (-A)**diamond.left.degree()),
+        A.parent()(diamond.right.gen().minpoly()(-B/A) * (-A)**diamond.right.degree())
     )
-    for a in range(-500, 500):
+    for a in range(-2, 2):
         if a == 0:
             continue
-        if a % 100 == 0:
-            print(a)
 
         sieving_data = ({}, {})
         for p in factor_basis[0]:
@@ -125,17 +125,17 @@ def sieve_relations(diamond: Diamond, factor_basis):
             if sieving_data[0][p] is None:
                 continue
             sieving_start, sieving_distances = sieving_data[0][p]
-            sieve(start, end, p, sieving_start, sieving_distances, sieving_interval[0])
+            sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval[0])
 
         for p in factor_basis[1]:
             if sieving_data[1][p] is None:
                 continue
             sieving_start, sieving_distances = sieving_data[1][p]
-            sieve(start, end, p, sieving_start, sieving_distances, sieving_interval[1])
+            sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval[1])
 
-        for i in range(len(sieving_interval)):
+        for i in range(len(sieving_interval[0])):
             if (sieving_interval[0][i] == 1 or sieving_interval[0][i] == -1) and (sieving_interval[1][i] == 1 or sieving_interval[1][i] == -1):
-                b = i - start
+                b = i + start
                 left = a * diamond.left.gen() + b
                 right = a * diamond.right.gen() + b
                 yield (SmoothElement(left, find_valuation_vector(left, factor_basis[0])), SmoothElement(right, find_valuation_vector(right, factor_basis[1])))
