@@ -1,0 +1,26 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "preparse current file",
+            "dependsOn": [
+                "run preparser"
+            ],
+            "command": "mv",
+            "args": [
+                "${fileBasenameNoExtension}.sage.py",
+                "${fileBasenameNoExtension}_sage.py"
+            ]
+        },
+        {
+            "label": "run preparser",
+            "command": "/home/feanor/sage-9.4/sage",
+            "args": [
+                "--preparse",
+                "${fileBasenameNoExtension}.sage",
+            ]
+        }
+    ]
+}
