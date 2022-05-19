@@ -1,6 +1,7 @@
 
-# the main commutative diagram we are working in
+
 class Diamond:
+    """The main diamond-shaped commutative diagram we are working in."""
 
     def __init__(self, f, g, m, N):
         assert f(m) % N == 0
@@ -24,6 +25,7 @@ class Diamond:
         return self.bottom(a.polynomial()(self.m))
 
 class SmoothElement:
+    """A number field element together with all prime ideal factor valuations."""
 
     def __init__(self, element, p_valuations):
         self.element = element
@@ -54,15 +56,6 @@ def p_valuations(I, p, factor_basis):
             I = I / ideal_data[i]
     return (valuations, I)
         
-
-def is_smooth(element, factor_basis):
-    N = element.norm()
-    for p in factor_basis:
-        if N % p == 0:
-            N = N / p
-
-    return N.norm() == 1 or N.norm() == -1
-
 def find_valuation_vector(element, factor_basis):
     K = element.parent()
     result = {}
@@ -73,6 +66,13 @@ def find_valuation_vector(element, factor_basis):
     return result
 
 def find_sieving_distances(norm_poly, p, a):
+    """Computes the sieving start and distances, i.e. the cosets [b] for which N(a X + b)
+    is divisible by p. 
+    
+    The return value is (start, distances) where distances contains positive integers such that all cosets are 
+    start, start + distances[0], start + distances[0] + distances[1], ..., start + distances[0] + ... + distances[-1] = start + p;
+    The advantage of this format is that one can start with some begin value congruent to start and step by consecutive
+    entries of distances to easily iterate through all such b within an interval."""
     poly_ring = PolynomialRing(ZZ, ['X'])
     f = poly_ring(norm_poly(A = a, B = X)).change_ring(GF(p))
     points = [ZZ(r) for (r, _) in f.roots()]
@@ -84,6 +84,8 @@ def find_sieving_distances(norm_poly, p, a):
     return (points[0], distances)
 
 def sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval):
+    """Sieves the given interval by a specified prime, i.e. divides every entry by p
+    as often as possible."""
     current = start + p - (start % p) + sieving_start
     while True:
         for d in sieving_distances:
@@ -95,43 +97,40 @@ def sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interva
             if current >= end:
                 return
 
+def sieve(start, end, factor_basis, norm_poly, a):
+    """Sieves the interval [N(a X + start); N(a X + end)[, i.e. considers the elements a X + i
+    where i in [start; end[ and divides every element as often as possible by primes in the factor
+    base. In other words, after sieving each entry is coprime to the factor base, and +/- 1 if and
+    only if N(a X + i) is factor_basis-smooth"""
+    sieving_data = {}
+    for p in factor_basis:
+        sieving_data[p] = find_sieving_distances(norm_poly, p, a)
+
+    sieving_interval = [norm_poly(a, b) for b in range(start, end)]
+
+    for p in factor_basis:
+        if sieving_data[p] is None:
+            continue
+        sieving_start, sieving_distances = sieving_data[p]
+        sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval)
+    return sieving_interval
 
 def sieve_relations(diamond: Diamond, factor_basis):
-    poly_ring = PolynomialRing(ZZ, ['X'])
-    X, = poly_ring.gens()
     A, B = PolynomialRing(ZZ, ['A', 'B']).gens()
     norm_polys = (
         A.parent()(diamond.left.gen().minpoly()(-B/A) * (-A)**diamond.left.degree()),
         A.parent()(diamond.right.gen().minpoly()(-B/A) * (-A)**diamond.right.degree())
     )
+    start = -500
+    end = 500
     for a in range(-2, 2):
         if a == 0:
             continue
 
-        sieving_data = ({}, {})
-        for p in factor_basis[0]:
-            sieving_data[0][p] = find_sieving_distances(norm_polys[0], p, a)
-        for p in factor_basis[0]:
-            sieving_data[1][p] = find_sieving_distances(norm_polys[1], p, a)
-
-        start = -500
-        end = 500
         sieving_interval = (
-            [(a * diamond.left.gen() + b).norm() for b in range(start, end)], 
-            [(a * diamond.right.gen() + b).norm() for b in range(start, end)]
+            sieve(start, end, factor_basis[0], norm_polys[0], a),
+            sieve(start, end, factor_basis[1], norm_polys[1], a)
         )
-
-        for p in factor_basis[0]:
-            if sieving_data[0][p] is None:
-                continue
-            sieving_start, sieving_distances = sieving_data[0][p]
-            sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval[0])
-
-        for p in factor_basis[1]:
-            if sieving_data[1][p] is None:
-                continue
-            sieving_start, sieving_distances = sieving_data[1][p]
-            sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval[1])
 
         for i in range(len(sieving_interval[0])):
             if (sieving_interval[0][i] == 1 or sieving_interval[0][i] == -1) and (sieving_interval[1][i] == 1 or sieving_interval[1][i] == -1):
@@ -146,7 +145,7 @@ def enter_relation_in_matrix(relation, matrix, row, prime_index_map):
         for j in range(len(v)):
             matrix[row, prime_index_map[p] + j] = v[j]
 
-def linalg_step(diamond: Diamond, relations, factor_basis):
+def find_congruent_square(diamond: Diamond, relations, factor_basis):
     m = len(relations[0])
     counter = 0
     prime_index_map = ({}, {})
@@ -182,18 +181,25 @@ P = PolynomialRing(ZZ, ['X'])
 X = P.gen(0)
 diamond = Diamond(X - 162, X**2 - 82, 162, N)
 B = 40
+
 factor_basis = (gen_factor_basis(B, diamond.left), gen_factor_basis(B, diamond.right))
+factor_basis_len = sum(len(v) for v in factor_basis[0].values()) + sum(len(v) for v in factor_basis[1].values())
 relations = ([], [])
+
+# add the trivial relations
 for p in Primes():
     if p > B:
         break
     relations[0].append(SmoothElement(diamond.left(p), find_valuation_vector(diamond.left(p), factor_basis[0])))
     relations[1].append(SmoothElement(diamond.right(p), find_valuation_vector(diamond.right(p), factor_basis[1])))
 
+# sieve for more relations
 for relation in sieve_relations(diamond, factor_basis):
     relations[0].append(relation[0])
     relations[1].append(relation[1])
     print("found relation: " + str(relation[0]) + " ~ " + str(relation[1]))
+    if len(relations[0]) > factor_basis_len + 50:
+        break
 
-p, q = linalg_step(diamond, relations, factor_basis)
+p, q = find_congruent_square(diamond, relations, factor_basis)
 print("Found " + str(N) + " = " + str(p) + " * " + str(q))
