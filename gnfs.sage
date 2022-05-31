@@ -49,15 +49,11 @@ class SplitPrimeIdeal:
 
 def gen_factor_basis(B, K):
     result = {}
-    f = K.gen().minpoly()
-    poly_ring = PolynomialRing(ZZ, ['X'])
     for p in Primes():
         if p > B:
             return result
-        # either f mod p splits, or not...
-        factorization = factor(f.change_ring(GF(p)))
         result[p] = [
-            K.ideal([p, poly_ring(factorization[i][0])(K.gen())]) for i in range(len(factorization))
+            I for (I, _) in K.ideal([p]).factor()
         ]
 
 def gen_character_basis(B, size, K):
@@ -104,15 +100,15 @@ def find_relation_data(element, factor_basis, character_basis) -> SmoothElement:
     )
 
 def find_sieving_distances(norm_poly, p, a):
-    """Computes the sieving start and distances, i.e. the cosets [b] for which N(a X + b)
-    is divisible by p. 
+    """Computes the sieving start and distances, i.e. the cosets [b] for which N(a X + b) is divisible by p. 
     
     The return value is (start, distances) where distances contains positive integers such that all cosets are 
     start, start + distances[0], start + distances[0] + distances[1], ..., start + distances[0] + ... + distances[-1] = start + p;
     The advantage of this format is that one can start with some begin value congruent to start and step by consecutive
     entries of distances to easily iterate through all such b within an interval."""
-    poly_ring = PolynomialRing(ZZ, ['X'])
-    f = poly_ring(norm_poly(A = a, B = X)).change_ring(GF(p))
+    poly_ring = PolynomialRing(ZZ, ['x'])
+    x, = poly_ring.gens()
+    f = poly_ring(norm_poly(A = a, B = x)).change_ring(GF(p))
     points = [ZZ(r) for (r, _) in f.roots()]
     if len(points) == 0:
         return None
@@ -159,9 +155,9 @@ def sieve_relations(diamond: Diamond, factor_basis, character_basis):
         A.parent()(diamond.left.gen().minpoly()(-B/A) * (-A)**diamond.left.degree()),
         A.parent()(diamond.right.gen().minpoly()(-B/A) * (-A)**diamond.right.degree())
     )
-    start = -500
-    end = 500
-    for a in range(-2, 2):
+    start = -1000
+    end = 1000
+    for a in range(-4, 4):
         if a == 0:
             continue
 
@@ -219,23 +215,41 @@ def find_congruent_square(diamond: Diamond, relations, factor_basis, character_b
             print("found congruent square: " + str(left) + "; " + str(right))
             if left != right and left != -right:
                 return (gcd(diamond.N, ZZ(left - right)), gcd(diamond.N, ZZ(left + right)))
+        else:
+            print("kernel element that does not yield a square")
 
-N = 103 * 127
-P = PolynomialRing(ZZ, ['X'])
-X = P.gen(0)
-diamond = Diamond(X - 162, X**2 - 82, 162, N)
+def find_diamond(N, number_field_degree):
+    base = ZZ(floor(float(N)**(1/number_field_degree)))
+    P = PolynomialRing(ZZ, ['x'])
+    x = P.gen()
+    f = 0
+    current = N
+    for i in range(number_field_degree + 1):
+        coeff = current % base
+        f += coeff * x**i
+        current = ZZ((current - coeff) / base)
+    assert current == 0
+    assert f.lc() == 1
+    return Diamond(x - base, f, base, N)
+
+N = next_prime(1000) * next_prime(1200)
+diamond = find_diamond(N, 2)
 B = 40
 
 factor_basis = (gen_factor_basis(B, diamond.left), gen_factor_basis(B, diamond.right))
 character_basis = ([], gen_character_basis(B, 20, diamond.right))
+constraints_len = sum(len(v) for v in factor_basis[0].values()) + \
+    sum(len(v) for v in factor_basis[1].values()) + \
+    len(character_basis[0]) + \
+    len(character_basis[1])
 relations = ([], [])
-constraints_len = sum(len(v) for v in factor_basis[0].values()) + sum(len(v) for v in factor_basis[1].values()) + len(character_basis[0]) + len(character_basis[1])
 
+print()
 print("Left field is " + str(diamond.left))
 print("   Using factor basis with " + str(sum(len(factor_basis[0][p]) for p in factor_basis[0])) + " elements")
 print("   Using quadratic character basis with " + str(len(character_basis[0])) + " elements")
 print()
-print("Right field is " + str(diamond.left))
+print("Right field is " + str(diamond.right))
 print("   Using factor basis with " + str(sum(len(factor_basis[1][p]) for p in factor_basis[1])) + " elements")
 print("   Using quadratic character basis with " + str(len(character_basis[1])) + " elements")
 print()
