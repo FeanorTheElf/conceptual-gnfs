@@ -27,12 +27,25 @@ class Diamond:
 class SmoothElement:
     """A number field element together with all prime ideal factor valuations."""
 
-    def __init__(self, element, p_valuations):
+    def __init__(self, element, p_valuations, character_values):
         self.element = element
         self.p_valuations = p_valuations
+        self.character_values = character_values
 
     def __repr__(self) -> str:
         return str(self.element)
+
+class SplitPrimeIdeal:
+    """A prime ideal of the form (p, x + s) where x is an integral primitive element
+    of the number field."""
+
+    def __init__(self, norm, s) -> None:
+        assert norm.is_prime()
+        self.norm = norm
+        self.s = s
+
+    def in_quotient_field(self, element):
+        return element.polynomial().change_ring(ZZ)(self.s)
 
 def gen_factor_basis(B, K):
     result = {}
@@ -46,7 +59,19 @@ def gen_factor_basis(B, K):
         result[p] = [
             K.ideal([p, poly_ring(factorization[i][0])(K.gen())]) for i in range(len(factorization))
         ]
-        
+
+def gen_character_basis(B, size, K):
+    result = []
+    f = K.gen().minpoly()
+    current = next_prime(B)
+    for _ in range(size):
+        p = current
+        roots = f.change_ring(GF(p)).roots()
+        if len(roots) == K.degree():
+            result.append(SplitPrimeIdeal(p, roots[0][0]))
+        current = next_prime(current + 1)
+    return result
+
 def p_valuations(I, p, factor_basis):
     ideal_data = factor_basis[p]
     valuations = [0 for _ in range(len(ideal_data))]
@@ -64,6 +89,19 @@ def find_valuation_vector(element, factor_basis):
         result[p], current = p_valuations(current, p, factor_basis)
     assert current == K.ideal([1])
     return result
+
+def find_character_vector(element, character_basis):
+    K = element.parent()
+    return [
+        0 if p.in_quotient_field(element).is_square() else 1 for p in character_basis
+    ]
+
+def find_relation_data(element, factor_basis, character_basis) -> SmoothElement:
+    return SmoothElement(
+        element, 
+        find_valuation_vector(element, factor_basis),
+        find_character_vector(element, character_basis)
+    )
 
 def find_sieving_distances(norm_poly, p, a):
     """Computes the sieving start and distances, i.e. the cosets [b] for which N(a X + b)
@@ -115,7 +153,7 @@ def sieve(start, end, factor_basis, norm_poly, a):
         sieve_prime(start, end, p, sieving_start, sieving_distances, sieving_interval)
     return sieving_interval
 
-def sieve_relations(diamond: Diamond, factor_basis):
+def sieve_relations(diamond: Diamond, factor_basis, character_basis):
     A, B = PolynomialRing(ZZ, ['A', 'B']).gens()
     norm_polys = (
         A.parent()(diamond.left.gen().minpoly()(-B/A) * (-A)**diamond.left.degree()),
@@ -137,15 +175,20 @@ def sieve_relations(diamond: Diamond, factor_basis):
                 b = i + start
                 left = a * diamond.left.gen() + b
                 right = a * diamond.right.gen() + b
-                yield (SmoothElement(left, find_valuation_vector(left, factor_basis[0])), SmoothElement(right, find_valuation_vector(right, factor_basis[1])))
+                yield (
+                    find_relation_data(left, factor_basis[0], character_basis[0]), 
+                    find_relation_data(right, factor_basis[1], character_basis[1])
+                )
 
-def enter_relation_in_matrix(relation, matrix, row, prime_index_map):
+def enter_relation_in_matrix(relation, matrix, row, prime_index_map, character_index_start):
     for p in relation.p_valuations:
         v = relation.p_valuations[p]
         for j in range(len(v)):
             matrix[row, prime_index_map[p] + j] = v[j]
+    for i in range(len(relation.character_values)):
+        matrix[row, character_index_start + i] = relation.character_values[i]
 
-def find_congruent_square(diamond: Diamond, relations, factor_basis):
+def find_congruent_square(diamond: Diamond, relations, factor_basis, character_basis):
     m = len(relations[0])
     counter = 0
     prime_index_map = ({}, {})
@@ -156,12 +199,13 @@ def find_congruent_square(diamond: Diamond, relations, factor_basis):
         prime_index_map[1][p] = counter
         counter += len(factor_basis[1][p])
 
-    n = counter
+    character_index_start = (counter, counter + len(character_basis[0]))
+    n = counter + len(character_basis[0]) + len(character_basis[1])
     A = Matrix(GF(2), m, n)
 
     for i in range(m):
-        enter_relation_in_matrix(relations[0][i], A, i, prime_index_map[0])
-        enter_relation_in_matrix(relations[1][i], A, i, prime_index_map[1])
+        enter_relation_in_matrix(relations[0][i], A, i, prime_index_map[0], character_index_start[0])
+        enter_relation_in_matrix(relations[1][i], A, i, prime_index_map[1], character_index_start[1])
 
     for g in kernel(A).gens():
 
@@ -183,23 +227,33 @@ diamond = Diamond(X - 162, X**2 - 82, 162, N)
 B = 40
 
 factor_basis = (gen_factor_basis(B, diamond.left), gen_factor_basis(B, diamond.right))
-factor_basis_len = sum(len(v) for v in factor_basis[0].values()) + sum(len(v) for v in factor_basis[1].values())
+character_basis = ([], gen_character_basis(B, 20, diamond.right))
 relations = ([], [])
+constraints_len = sum(len(v) for v in factor_basis[0].values()) + sum(len(v) for v in factor_basis[1].values()) + len(character_basis[0]) + len(character_basis[1])
+
+print("Left field is " + str(diamond.left))
+print("   Using factor basis with " + str(sum(len(factor_basis[0][p]) for p in factor_basis[0])) + " elements")
+print("   Using quadratic character basis with " + str(len(character_basis[0])) + " elements")
+print()
+print("Right field is " + str(diamond.left))
+print("   Using factor basis with " + str(sum(len(factor_basis[1][p]) for p in factor_basis[1])) + " elements")
+print("   Using quadratic character basis with " + str(len(character_basis[1])) + " elements")
+print()
 
 # add the trivial relations
 for p in Primes():
     if p > B:
         break
-    relations[0].append(SmoothElement(diamond.left(p), find_valuation_vector(diamond.left(p), factor_basis[0])))
-    relations[1].append(SmoothElement(diamond.right(p), find_valuation_vector(diamond.right(p), factor_basis[1])))
+    relations[0].append(find_relation_data(diamond.left(p), factor_basis[0], character_basis[0]))
+    relations[1].append(find_relation_data(diamond.right(p), factor_basis[1], character_basis[1]))
 
 # sieve for more relations
-for relation in sieve_relations(diamond, factor_basis):
+for relation in sieve_relations(diamond, factor_basis, character_basis):
     relations[0].append(relation[0])
     relations[1].append(relation[1])
     print("found relation: " + str(relation[0]) + " ~ " + str(relation[1]))
-    if len(relations[0]) > factor_basis_len + 50:
+    if len(relations[0]) > constraints_len + 5:
         break
 
-p, q = find_congruent_square(diamond, relations, factor_basis)
+p, q = find_congruent_square(diamond, relations, factor_basis, character_basis)
 print("Found " + str(N) + " = " + str(p) + " * " + str(q))
